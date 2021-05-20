@@ -17,8 +17,8 @@ module Wallet.Types(
     , Payment(..)
     , emptyPayment
     , AddressChangeRequest(..)
-    , targetSlot
-    , slotRange
+    , targetTime
+    , timeRange
     , AddressChangeResponse(..)
     -- * Error types
     , MatchingError(..)
@@ -49,8 +49,8 @@ import qualified Data.UUID.V4                     as UUID
 import           GHC.Generics                     (Generic)
 import qualified Language.Haskell.TH.Syntax       as TH
 
-import           Ledger                           (Address, OnChainTx, Slot, SlotRange, TxIn, TxOut, eitherTx, interval,
-                                                   txId)
+import           Ledger                           (Address, OnChainTx, POSIXTime, POSIXTimeRange, TxIn, TxOut, eitherTx,
+                                                   interval, txId)
 import           Ledger.Constraints.OffChain      (MkTxError)
 import           Plutus.Contract.Checkpoint       (AsCheckpointError (..), CheckpointError)
 import           Wallet.Emulator.Error            (WalletAPIError)
@@ -194,47 +194,47 @@ emptyPayment :: Payment
 emptyPayment = Payment { paymentInputs = Set.empty, paymentChangeOutput = Nothing }
 
 -- | Information about transactions that spend or produce an output at
---   an address in a slot range.
+--   an address in a time range.
 data AddressChangeResponse =
     AddressChangeResponse
         { acrAddress   :: Address -- ^ The address
-        , acrSlotRange :: SlotRange -- ^ The slot range
-        , acrTxns      :: [OnChainTx] -- ^ Transactions that were validated in the slot range and spent or produced at least one output at the address.
+        , acrTimeRange :: POSIXTimeRange -- ^ The time range
+        , acrTxns      :: [OnChainTx] -- ^ Transactions that were validated in the time range and spent or produced at least one output at the address.
         }
         deriving stock (Eq, Generic, Show)
         deriving anyclass (ToJSON, FromJSON)
 
 instance Pretty AddressChangeResponse where
-    pretty AddressChangeResponse{acrAddress, acrTxns, acrSlotRange} =
+    pretty AddressChangeResponse{acrAddress, acrTxns, acrTimeRange} =
         hang 2 $ vsep
             [ "Address:" <+> pretty acrAddress
-            , "Slot range:" <+> pretty acrSlotRange
+            , "Time range:" <+> pretty acrTimeRange
             , "Tx IDs:" <+> pretty (eitherTx txId txId <$> acrTxns)
             ]
 
 -- | Request for information about transactions that spend or produce
---   outputs at a specific address in a slot range.
+--   outputs at a specific address in a time range.
 data AddressChangeRequest =
     AddressChangeRequest
-        { acreqSlotRangeFrom :: Slot
-        , acreqSlotRangeTo   :: Slot
+        { acreqTimeRangeFrom :: POSIXTime
+        , acreqTimeRangeTo   :: POSIXTime
         , acreqAddress       :: Address -- ^ The address
         }
         deriving stock (Eq, Generic, Show, Ord)
         deriving anyclass (ToJSON, FromJSON)
 
--- | The earliest slot in which we can respond to an 'AddressChangeRequest'.
-targetSlot :: AddressChangeRequest -> Slot
-targetSlot = succ . acreqSlotRangeTo
+-- | The earliest time in which we can respond to an 'AddressChangeRequest'.
+targetTime :: AddressChangeRequest -> POSIXTime
+targetTime = succ . acreqTimeRangeTo
 
--- | The slot range for this request
-slotRange :: AddressChangeRequest -> SlotRange
-slotRange AddressChangeRequest{acreqSlotRangeFrom, acreqSlotRangeTo} =
-    interval acreqSlotRangeFrom acreqSlotRangeTo
+-- | The time range for this request
+timeRange :: AddressChangeRequest -> POSIXTimeRange
+timeRange AddressChangeRequest{acreqTimeRangeFrom, acreqTimeRangeTo} =
+    interval acreqTimeRangeFrom acreqTimeRangeTo
 
 instance Pretty AddressChangeRequest where
-    pretty AddressChangeRequest{acreqSlotRangeFrom, acreqSlotRangeTo, acreqAddress} =
+    pretty AddressChangeRequest{acreqTimeRangeFrom, acreqTimeRangeTo, acreqAddress} =
         hang 2 $ vsep
-            [ "From " <+> pretty acreqSlotRangeFrom <+> "to" <+> pretty acreqSlotRangeTo
+            [ "From " <+> pretty acreqTimeRangeFrom <+> "to" <+> pretty acreqTimeRangeTo
             , "Address:" <+> pretty acreqAddress
             ]

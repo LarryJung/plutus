@@ -28,7 +28,7 @@ import qualified Ledger
 import qualified Ledger.Contexts             as V
 import qualified Ledger.Interval             as Interval
 import qualified Ledger.Scripts              as Scripts
-import           Ledger.Slot                 (Slot, SlotRange)
+import           Ledger.Time                 (POSIXTime, POSIXTimeRange)
 import qualified Ledger.TimeSlot             as TimeSlot
 import qualified Ledger.Typed.Scripts        as Scripts
 import           Ledger.Value                (Value)
@@ -44,9 +44,9 @@ import qualified Wallet.Emulator             as Emulator
 
 -- | A crowdfunding campaign.
 data Campaign = Campaign
-    { campaignDeadline           :: Slot
+    { campaignDeadline           :: POSIXTime
     -- ^ The date by which the campaign funds can be contributed.
-    , campaignCollectionDeadline :: Slot
+    , campaignCollectionDeadline :: POSIXTime
     -- ^ The date by which the campaign owner has to collect the funds
     , campaignOwner              :: PubKeyHash
     -- ^ Public key of the campaign owner. This key is entitled to retrieve the
@@ -77,7 +77,7 @@ newtype Contribution = Contribution
 
 -- | Construct a 'Campaign' value from the campaign parameters,
 --   using the wallet's public key.
-mkCampaign :: Slot -> Slot -> Wallet -> Campaign
+mkCampaign :: POSIXTime -> POSIXTime -> Wallet -> Campaign
 mkCampaign ddl collectionDdl ownerWallet =
     Campaign
         { campaignDeadline = ddl
@@ -85,13 +85,13 @@ mkCampaign ddl collectionDdl ownerWallet =
         , campaignOwner = pubKeyHash $ Emulator.walletPubKey ownerWallet
         }
 
--- | The 'SlotRange' during which the funds can be collected
-collectionRange :: Campaign -> SlotRange
+-- | The 'POSIXTimeRange' during which the funds can be collected
+collectionRange :: Campaign -> POSIXTimeRange
 collectionRange cmp =
     Interval.interval (campaignDeadline cmp) (campaignCollectionDeadline cmp)
 
--- | The 'SlotRange' during which a refund may be claimed
-refundRange :: Campaign -> SlotRange
+-- | The 'POSIXTimeRange' during which a refund may be claimed
+refundRange :: Campaign -> POSIXTimeRange
 refundRange cmp =
     Interval.from (campaignCollectionDeadline cmp)
 
@@ -111,14 +111,14 @@ scriptInstance = Scripts.validatorParam @Crowdfunding
 validRefund :: Campaign -> PubKeyHash -> TxInfo -> Bool
 validRefund campaign contributor txinfo =
     -- Check that the transaction falls in the refund range of the campaign
-    Interval.contains (TimeSlot.slotRangeToPOSIXTimeRange $ refundRange campaign) (txInfoValidRange txinfo)
+    refundRange campaign `Interval.contains` txInfoValidRange txinfo
     -- Check that the transaction is signed by the contributor
     && (txinfo `V.txSignedBy` contributor)
 
 validCollection :: Campaign -> TxInfo -> Bool
 validCollection campaign txinfo =
     -- Check that the transaction falls in the collection range of the campaign
-    (TimeSlot.slotRangeToPOSIXTimeRange (collectionRange campaign) `Interval.contains` txInfoValidRange txinfo)
+    (collectionRange campaign `Interval.contains` txInfoValidRange txinfo)
     -- Check that the transaction is signed by the campaign owner
     && (txinfo `V.txSignedBy` campaignOwner campaign)
 
@@ -151,8 +151,8 @@ crowdfunding c = contribute c `select` scheduleCollection c
 -- | A sample campaign
 theCampaign :: Campaign
 theCampaign = Campaign
-    { campaignDeadline = 40
-    , campaignCollectionDeadline = 60
+    { campaignDeadline = TimeSlot.slotToPOSIXTime 40
+    , campaignCollectionDeadline = TimeSlot.slotToPOSIXTime 60
     , campaignOwner = pubKeyHash $ Emulator.walletPubKey (Emulator.Wallet 1)
     }
 
@@ -166,7 +166,7 @@ contribute cmp = do
     contributor <- pubKeyHash <$> ownPubKey
     let inst = scriptInstance cmp
         tx = Constraints.mustPayToTheScript contributor contribValue
-                <> Constraints.mustValidateIn (Ledger.interval 1 (campaignDeadline cmp))
+                <> Constraints.mustValidateIn (Ledger.interval (TimeSlot.slotToPOSIXTime 1) (campaignDeadline cmp))
     txid <- fmap txId (submitTxConstraints inst tx)
 
     utxo <- watchAddressUntil (Scripts.scriptAddress inst) (campaignCollectionDeadline cmp)
@@ -195,7 +195,7 @@ scheduleCollection cmp = do
     -- run the 'trg' action right away)
     () <- endpoint @"schedule collection"
 
-    _ <- awaitSlot (campaignDeadline cmp)
+    _ <- awaitTime (campaignDeadline cmp)
     unspentOutputs <- utxoAt (Scripts.scriptAddress inst)
 
     let tx = Typed.collectFromScript unspentOutputs Collect

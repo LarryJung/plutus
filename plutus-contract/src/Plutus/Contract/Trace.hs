@@ -6,9 +6,7 @@
 {-# LANGUAGE FlexibleContexts       #-}
 {-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE KindSignatures         #-}
 {-# LANGUAGE LambdaCase             #-}
-{-# LANGUAGE MonoLocalBinds         #-}
 {-# LANGUAGE NamedFieldPuns         #-}
 {-# LANGUAGE NumericUnderscores     #-}
 {-# LANGUAGE OverloadedStrings      #-}
@@ -31,7 +29,7 @@ module Plutus.Contract.Trace
     , handleAddressChangedAtQueries
     -- * Handle blockchain events repeatedly
     , handleBlockchainQueries
-    , handleSlotNotifications
+    , handleTimeNotifications
     -- * Initial distributions of emulated chains
     , InitialDistribution
     , defaultDist
@@ -57,11 +55,11 @@ import           Data.Text.Prettyprint.Doc                (Pretty, pretty, (<+>)
 import           GHC.Generics                             (Generic)
 
 import           Data.Text                                (Text)
-import           Plutus.Contract                          (HasAwaitSlot, HasTxConfirmation, HasUtxoAt, HasWatchAddress,
+import           Plutus.Contract                          (HasAwaitTime, HasTxConfirmation, HasUtxoAt, HasWatchAddress,
                                                            HasWriteTx)
 import           Plutus.Contract.Schema                   (Event (..), Handlers (..))
 
-import qualified Plutus.Contract.Effects.AwaitSlot        as AwaitSlot
+import qualified Plutus.Contract.Effects.AwaitTime        as AwaitTime
 import           Plutus.Contract.Effects.AwaitTxConfirmed (TxConfirmed (..))
 import qualified Plutus.Contract.Effects.AwaitTxConfirmed as AwaitTxConfirmed
 import           Plutus.Contract.Effects.Instance         (HasOwnId)
@@ -119,17 +117,17 @@ makeTimed e = do
     emulatorTime <- gets (view (EM.chainState . EM.currentSlot))
     pure $ review (EM.emulatorTimeEvent emulatorTime) (EM.NotificationEvent e)
 
-handleSlotNotifications ::
-    ( HasAwaitSlot s
+handleTimeNotifications ::
+    ( HasAwaitTime s
     , Member (LogObserve (LogMessage Text)) effs
     , Member (LogMsg RequestHandlerLogMsg) effs
     , Member WalletEffect effs
     )
     => RequestHandler effs (Handlers s) (Event s)
-handleSlotNotifications =
-    maybeToHandler AwaitSlot.request
-    >>> RequestHandler.handleSlotNotifications
-    >>^ AwaitSlot.event
+handleTimeNotifications =
+    maybeToHandler AwaitTime.request
+    >>> RequestHandler.handleTimeNotifications
+    >>^ AwaitTime.event
 
 handleBlockchainQueries ::
     ( HasWriteTx s
@@ -139,7 +137,7 @@ handleBlockchainQueries ::
     , HasWatchAddress s
     , HasOwnId s
     , HasContractNotify s
-    , HasAwaitSlot s
+    , HasAwaitTime s
     )
     => RequestHandler (Reader ContractInstanceId ': ContractRuntimeEffect ': EmulatedWalletEffects) (Handlers s) (Event s)
 handleBlockchainQueries =
@@ -150,7 +148,7 @@ handleBlockchainQueries =
     <> handleAddressChangedAtQueries
     <> handleOwnInstanceIdQueries
     <> handleContractNotifications
-    <> handleSlotNotifications
+    <> handleTimeNotifications
 
 -- | Submit the wallet's pending transactions to the blockchain
 --   and inform all wallets about new transactions and respond to

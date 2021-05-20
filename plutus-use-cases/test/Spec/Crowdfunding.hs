@@ -24,12 +24,13 @@ import qualified Test.Tasty.HUnit                      as HUnit
 
 import qualified Ledger.Ada                            as Ada
 import           Ledger.Slot                           (Slot (..))
+import qualified Ledger.TimeSlot                       as TimeSlot
 import           Plutus.Contract                       hiding (runError)
 import           Plutus.Contract.Test
 import           Plutus.Contracts.Crowdfunding
 import           Plutus.Trace.Emulator                 (ContractHandle (..), EmulatorTrace)
 import qualified Plutus.Trace.Emulator                 as Trace
-import qualified PlutusTx                              as PlutusTx
+import qualified PlutusTx
 import qualified PlutusTx.Prelude                      as PlutusTx
 import qualified Streaming.Prelude                     as S
 import qualified Wallet.Emulator.Folds                 as Folds
@@ -59,7 +60,7 @@ tests = testGroup "crowdfunding"
 
     , checkPredicate "make contributions and collect"
         (walletFundsChange w1 (Ada.lovelaceValueOf 225))
-        $ successfulCampaign
+        successfulCampaign
 
     , checkPredicate "cannot collect money too late"
         (walletFundsChange w1 PlutusTx.zero
@@ -103,8 +104,8 @@ tests = testGroup "crowdfunding"
 
     , goldenPir "test/Spec/crowdfunding.pir" $$(PlutusTx.compile [|| mkValidator ||])
     ,   let
-            deadline = 10
-            collectionDeadline = 15
+            deadline = TimeSlot.slotToPOSIXTime 10
+            collectionDeadline = TimeSlot.slotToPOSIXTime 15
             owner = w1
             cmp = mkCampaign deadline collectionDeadline owner
         in HUnit.testCaseSteps "script size is reasonable" $ \step -> reasonable' step (contributionScript cmp) 30000

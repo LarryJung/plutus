@@ -1,14 +1,12 @@
-{-# LANGUAGE DataKinds          #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE DerivingVia        #-}
-{-# LANGUAGE FlexibleContexts   #-}
-{-# LANGUAGE LambdaCase         #-}
-{-# LANGUAGE MonoLocalBinds     #-}
-{-# LANGUAGE NamedFieldPuns     #-}
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE RankNTypes         #-}
-{-# LANGUAGE TypeApplications   #-}
-{-# LANGUAGE TypeOperators      #-}
+{-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE DerivingVia       #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE MonoLocalBinds    #-}
+{-# LANGUAGE NamedFieldPuns    #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE TypeApplications  #-}
+{-# LANGUAGE TypeOperators     #-}
 module Plutus.Contract.Trace.RequestHandler(
     RequestHandler(..)
     , RequestHandlerLogMsg(..)
@@ -19,7 +17,7 @@ module Plutus.Contract.Trace.RequestHandler(
     , maybeToHandler
     -- * handlers for common requests
     , handleOwnPubKey
-    , handleSlotNotifications
+    , handleTimeNotifications
     , handlePendingTransactions
     , handleUtxoQueries
     , handleTxConfirmedQueries
@@ -48,9 +46,10 @@ import           Plutus.Contract.Resumable                (Request (..), Respons
 
 import           Control.Monad.Freer.Extras.Log           (LogMessage, LogMsg, LogObserve, logDebug, logWarn,
                                                            surroundDebug)
-import           Ledger                                   (Address, OnChainTx (..), PubKey, Slot, Tx, TxId)
+import           Ledger                                   (Address, OnChainTx (..), POSIXTime, PubKey, Tx, TxId)
 import           Ledger.AddressMap                        (AddressMap (..))
 import           Ledger.Constraints.OffChain              (UnbalancedTx (unBalancedTxTx))
+import qualified Ledger.TimeSlot                          as TimeSlot
 import           Plutus.Contract.Effects.AwaitTxConfirmed (TxConfirmed (..))
 import           Plutus.Contract.Effects.Instance         (OwnIdRequest)
 import           Plutus.Contract.Effects.UtxoAt           (UtxoAtAddress (..))
@@ -61,7 +60,7 @@ import qualified Wallet.Effects
 import           Wallet.Emulator.LogMessages              (RequestHandlerLogMsg (..), TxBalanceMsg)
 import           Wallet.Types                             (AddressChangeRequest (..), AddressChangeResponse,
                                                            ContractInstanceId, Notification, NotificationError,
-                                                           slotRange, targetSlot)
+                                                           targetTime, timeRange)
 
 
 -- | Request handlers that can choose whether to handle an effect (using
@@ -112,20 +111,20 @@ handleOwnPubKey =
     RequestHandler $ \_ ->
         surroundDebug @Text "handleOwnPubKey" Wallet.Effects.ownPubKey
 
-handleSlotNotifications ::
+handleTimeNotifications ::
     forall effs.
     ( Member WalletEffect effs
     , Member (LogObserve (LogMessage Text)) effs
     , Member (LogMsg RequestHandlerLogMsg) effs
     )
-    => RequestHandler effs Slot Slot
-handleSlotNotifications =
-    RequestHandler $ \targetSlot_ ->
-        surroundDebug @Text "handleSlotNotifications" $ do
-            currentSlot <- Wallet.Effects.walletSlot
-            logDebug $ SlotNoficationTargetVsCurrent targetSlot_ currentSlot
-            guard (currentSlot >= targetSlot_)
-            pure currentSlot
+    => RequestHandler effs POSIXTime POSIXTime
+handleTimeNotifications =
+    RequestHandler $ \targetTime_ ->
+        surroundDebug @Text "handleTimeNotifications" $ do
+            currentTime <- TimeSlot.slotToPOSIXTime <$> Wallet.Effects.walletSlot
+            logDebug $ TimeNoficationTargetVsCurrent targetTime_ currentTime
+            guard (currentTime >= targetTime_)
+            pure currentTime
 
 handlePendingTransactions ::
     forall effs.
@@ -184,14 +183,14 @@ handleAddressChangedAtQueries ::
 handleAddressChangedAtQueries = RequestHandler $ \req ->
     surroundDebug @Text "handleAddressChangedAtQueries" $ do
         current <- Wallet.Effects.walletSlot
-        let target = targetSlot req
-        logDebug $ HandleAddressChangedAt current (slotRange req)
+        logDebug $ HandleAddressChangedAt current (TimeSlot.posixTimeRangeToSlotRange $ timeRange req)
         -- If we ask the chain index for transactions that were confirmed in
         -- the current slot, we always get an empty list, because the chain
         -- index only learns about those transactions at the beginning of the
         -- next slot. So we need to make sure that we are past the current
         -- slot.
-        guard (current >= target)
+        let target = targetTime req
+        guard (TimeSlot.slotToPOSIXTime current >= target)
         Wallet.Effects.addressChanged req
 
 handleOwnInstanceIdQueries ::

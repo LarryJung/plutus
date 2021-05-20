@@ -69,11 +69,11 @@ throwAndCatch =
         handleError1 _ = pure ()
     in catching _Error1 throw handleError1
 
--- | Handle an error from another contract (in this case, 'awaitSlot')
-catchContractError :: (AsMyError e, HasAwaitSlot s) => Contract w s e ()
+-- | Handle an error from another contract (in this case, 'awaitTime')
+catchContractError :: (AsMyError e, HasAwaitTime s) => Contract w s e ()
 catchContractError =
     catching _MyContractError
-        (void $ mapError (review _MyContractError) $ awaitSlot 10)
+        (void $ mapError (review _MyContractError) $ awaitTime 10)
         (\_ -> throwing_ _Error2)
 
 contract

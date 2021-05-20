@@ -86,6 +86,7 @@
           "Data/UUID/Extras"
           "Plutus/Contract"
           "Plutus/Contract/Effects/AwaitSlot"
+          "Plutus/Contract/Effects/AwaitTime"
           "Plutus/Contract/Effects/AwaitTxConfirmed"
           "Plutus/Contract/Effects/Instance"
           "Plutus/Contract/Effects/RPC"

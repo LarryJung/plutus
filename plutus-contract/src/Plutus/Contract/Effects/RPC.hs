@@ -33,7 +33,7 @@ import           Data.Void                              (absurd)
 import           GHC.Generics                           (Generic)
 import           GHC.Natural                            (Natural)
 import           GHC.TypeLits                           (KnownSymbol, Symbol)
-import           Plutus.Contract.Effects.AwaitSlot      (HasAwaitSlot, waitNSlots)
+import           Plutus.Contract.Effects.AwaitTime      (HasAwaitTime, waitNSeconds)
 import           Plutus.Contract.Effects.ExposeEndpoint (Endpoint, HasEndpoint, endpoint)
 import           Plutus.Contract.Effects.Instance       (HasOwnId, ownInstanceId)
 import           Plutus.Contract.Effects.Notify
@@ -93,7 +93,7 @@ data Retries = NoRetries | MaxRetries Natural
 -- | Call an endpoint on another contract instance.
 callRPC :: forall r w s.
     ( HasOwnId s
-    , HasAwaitSlot s
+    , HasAwaitTime s
     , HasEndpoint (RPCResponseEndpoint r) (Either (RPCError r) (RPCResponse r)) s
     , HasContractNotify s
     , RPC r
@@ -116,7 +116,7 @@ callRPC retries targetInstance requestArgs =
                     unless (i < maxRetries) (throwError e)
                     -- TODO: The wait is currently linear, but we should change
                     -- it to exponential if this becomes a problem
-                    mapError RPCOtherError (waitNSlots 2) >> go (i + 1)
+                    mapError RPCOtherError (waitNSeconds 2) >> go (i + 1)
                 Left e -> throwError e
                 Right r -> pure r
     in go 0

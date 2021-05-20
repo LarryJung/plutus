@@ -3,7 +3,6 @@
 {-# LANGUAGE DefaultSignatures     #-}
 {-# LANGUAGE DeriveAnyClass        #-}
 {-# LANGUAGE DeriveGeneric         #-}
-{-# LANGUAGE DerivingStrategies    #-}
 {-# LANGUAGE DerivingVia           #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
@@ -48,6 +47,7 @@ import           Ledger.Constraints
 import qualified Ledger.Constraints           as Constraints
 import qualified Ledger.Interval              as Interval
 import           Ledger.Scripts               (Validator, datumHash, unitRedeemer)
+import qualified Ledger.TimeSlot              as TimeSlot
 import qualified Ledger.Typed.Scripts         as Scripts
 import           Ledger.Typed.Tx              (TypedScriptTxOut (..), tyTxOutData)
 import qualified Ledger.Value                 as Val
@@ -56,7 +56,7 @@ import           Plutus.Contract.StateMachine (AsSMContractError (..), StateMach
                                                StateMachineInstance (..), Void, WaitingResult (..), getStates)
 import qualified Plutus.Contract.StateMachine as SM
 import qualified Plutus.Contracts.Currency    as Currency
-import qualified PlutusTx                     as PlutusTx
+import qualified PlutusTx
 import qualified PlutusTx.AssocMap            as AssocMap
 import qualified PlutusTx.Prelude             as P
 
@@ -145,9 +145,9 @@ instance Monoid ContractProgress where
 marloweFollowContract :: Contract ContractHistory MarloweFollowSchema MarloweError ()
 marloweFollowContract = do
     params <- endpoint @"follow"
-    slot <- currentSlot
+    time <- currentTime
     logDebug @String "Getting contract history"
-    follow 0 slot params
+    follow (TimeSlot.slotToPOSIXTime 0) time params
   where
     follow ifrom ito params = do
         let client@StateMachineClient{scInstance} = mkMarloweClient params
@@ -155,8 +155,8 @@ marloweFollowContract = do
         let address = Scripts.scriptAddress inst
         AddressChangeResponse{acrTxns} <- addressChangeRequest
                 AddressChangeRequest
-                { acreqSlotRangeFrom = ifrom
-                , acreqSlotRangeTo = ito
+                { acreqTimeRangeFrom = ifrom
+                , acreqTimeRangeTo = ito
                 , acreqAddress = address
                 }
         let go [] = pure InProgress
@@ -225,7 +225,7 @@ marlowePlutusContract = do
     create = do
         (owners, contract) <- endpoint @"create"
         (params, distributeRoleTokens) <- setupMarloweParams owners contract
-        slot <- currentSlot
+        slot <- TimeSlot.posixTimeToSlot <$> currentTime
         let StateMachineClient{scInstance} = mkMarloweClient params
         let marloweData = MarloweData {
                 marloweContract = contract,
@@ -281,7 +281,7 @@ marlowePlutusContract = do
         maybeState <- SM.getOnChainState theClient
         case maybeState of
             Nothing -> do
-                wr <- SM.waitForUpdateUntil theClient untilSlot
+                wr <- SM.waitForUpdateUntil theClient (TimeSlot.slotToPOSIXTime untilSlot)
                 case wr of
                     ContractEnded -> do
                         logInfo @String $ "Contract Ended for party " <> show party
@@ -301,7 +301,7 @@ marlowePlutusContract = do
                       -> MarloweData
                       -> Contract MarloweContractState MarloweSchema MarloweError ()
     autoExecuteContract theClient party marloweData = do
-        slot <- currentSlot
+        slot <- TimeSlot.posixTimeToSlot <$> currentTime
         let slotRange = (slot, slot + defaultTxValidationRange)
         let action = getAction slotRange party marloweData
         case action of
@@ -316,15 +316,15 @@ marlowePlutusContract = do
                 catching (_StateMachineError) payDeposit $ \err -> do
                     logWarn @String $ "Error " <> show err
                     logInfo @String $ "Retry PayDeposit in 2 slots"
-                    _ <- awaitSlot (slot + 2)
+                    _ <- awaitTime (TimeSlot.slotToPOSIXTime $ slot + 2)
                     continueWith marloweData
             WaitForTimeout timeout -> do
                 logInfo @String $ "WaitForTimeout " <> show timeout
-                _ <- awaitSlot timeout
+                _ <- awaitTime (TimeSlot.slotToPOSIXTime timeout)
                 continueWith marloweData
             WaitOtherActionUntil timeout -> do
                 logInfo @String $ "WaitOtherActionUntil " <> show timeout
-                wr <- SM.waitForUpdateUntil theClient timeout
+                wr <- SM.waitForUpdateUntil theClient (TimeSlot.slotToPOSIXTime timeout)
                 case wr of
                     ContractEnded -> do
                         logInfo @String $ "Contract Ended"
@@ -444,7 +444,7 @@ applyInputs params slotInterval inputs = mapError (review _MarloweError) $ do
     slotRange <- case slotInterval of
             Just si -> pure si
             Nothing -> do
-                slot <- currentSlot
+                slot <- TimeSlot.posixTimeToSlot <$> currentTime
                 pure (slot, slot + defaultTxValidationRange)
     let theClient = mkMarloweClient params
     dat <- SM.runStep theClient (slotRange, inputs)
@@ -533,7 +533,7 @@ mkMarloweStateMachineTransition params SM.State{ SM.stateData=MarloweData{..}, S
                         finalBalance = totalIncome P.- totalPayouts
                         in (outputsConstraints, finalBalance)
             let range = Interval.interval minSlot maxSlot
-            let constraints = inputsConstraints <> outputsConstraints <> mustValidateIn range
+            let constraints = inputsConstraints <> outputsConstraints <> mustValidateIn (TimeSlot.slotRangeToPOSIXTimeRange range)
             if preconditionsOk
             then Just (constraints, SM.State marloweData finalBalance)
             else Nothing

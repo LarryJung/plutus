@@ -18,6 +18,7 @@ import qualified Ledger.Bytes                             as LedgerBytes
 import           Ledger.Crypto                            (PubKey, PubKeyHash, Signature)
 import           Ledger.Interval                          (Extended, Interval, LowerBound, UpperBound)
 import           Ledger.Slot                              (Slot)
+import           Ledger.Time                              (POSIXTime)
 import           Ledger.Tx                                (Tx, TxIn, TxInType, TxOut, TxOutRef)
 import           Ledger.TxId                              (TxId)
 import           Plutus.Contract.Effects.AwaitSlot        (WaitingForSlot (..))
@@ -26,7 +27,7 @@ import           Plutus.Contract.Effects.ExposeEndpoint   (ActiveEndpoint (..), 
                                                            EndpointValue (..))
 import           Plutus.Contract.Effects.OwnPubKey        (OwnPubKeyRequest (..))
 import           Plutus.PAB.Events.Contract
-import qualified PlutusTx                                 as PlutusTx
+import qualified PlutusTx
 import qualified PlutusTx.AssocMap                        as AssocMap
 import           Test.QuickCheck                          (Gen, oneof)
 import           Test.QuickCheck.Arbitrary.Generic        (Arbitrary, arbitrary, genericArbitrary, genericShrink,
@@ -113,6 +114,10 @@ instance Arbitrary PubKeyHash where
     shrink = genericShrink
 
 instance Arbitrary Slot where
+    arbitrary = genericArbitrary
+    shrink = genericShrink
+
+instance Arbitrary POSIXTime where
     arbitrary = genericArbitrary
     shrink = genericShrink
 

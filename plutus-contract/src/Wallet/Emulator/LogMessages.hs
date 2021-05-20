@@ -15,11 +15,13 @@ import           GHC.Generics                (Generic)
 import           Ledger                      (Address)
 import           Ledger.Constraints.OffChain (UnbalancedTx)
 import           Ledger.Slot                 (Slot, SlotRange)
+import           Ledger.Time                 (POSIXTime)
 import           Ledger.Value                (Value)
 import           Wallet.Emulator.Error       (WalletAPIError)
 
 data RequestHandlerLogMsg =
     SlotNoficationTargetVsCurrent Slot Slot
+    | TimeNoficationTargetVsCurrent POSIXTime POSIXTime
     | StartWatchingContractAddresses
     | HandleAddressChangedAt Slot SlotRange
     | HandleTxFailed WalletAPIError
@@ -31,6 +33,8 @@ instance Pretty RequestHandlerLogMsg where
     pretty = \case
         SlotNoficationTargetVsCurrent target current ->
             "target slot:" <+> pretty target <> "; current slot:" <+> pretty current
+        TimeNoficationTargetVsCurrent target current ->
+            "target time:" <+> pretty target <> "; current time:" <+> pretty current
         StartWatchingContractAddresses -> "Start watching contract addresses"
         HandleTxFailed e -> "handleTx failed:" <+> viaShow e
         HandleAddressChangedAt current slotRange ->

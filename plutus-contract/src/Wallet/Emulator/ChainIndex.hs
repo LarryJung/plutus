@@ -32,13 +32,14 @@ import           Wallet.Effects                   (ChainIndexEffect (..))
 import           Wallet.Emulator.ChainIndex.Index (ChainIndex, ChainIndexItem (..))
 import qualified Wallet.Emulator.ChainIndex.Index as Index
 import           Wallet.Emulator.NodeClient       (ChainClientNotification (..))
-import           Wallet.Types                     (AddressChangeRequest (..), AddressChangeResponse (..), slotRange)
+import           Wallet.Types                     (AddressChangeRequest (..), AddressChangeResponse (..), timeRange)
 
 import           Ledger.Address                   (Address)
 import           Ledger.AddressMap                (AddressMap)
 import qualified Ledger.AddressMap                as AM
 import           Ledger.Blockchain                (Blockchain, eitherTx)
 import           Ledger.Slot                      (Slot)
+import qualified Ledger.TimeSlot                  as TimeSlot
 import           Ledger.Tx                        (txId)
 import           Ledger.TxId                      (TxId)
 
@@ -112,10 +113,11 @@ handleChainIndex = interpret $ \case
         Map.member txid <$> gets _idxConfirmedTransactions
     AddressChanged r@AddressChangeRequest{acreqAddress} -> do
         idx <- gets _idxIdx
-        let itms = Index.transactionsAt idx (slotRange r) acreqAddress
+        let slotRange = TimeSlot.posixTimeRangeToSlotRange $ timeRange r
+            itms = Index.transactionsAt idx slotRange acreqAddress
         logDebug $ HandlingAddressChangeRequest r itms
         pure $ AddressChangeResponse
             { acrAddress=acreqAddress
-            , acrSlotRange=slotRange r
+            , acrTimeRange=timeRange r
             , acrTxns = fmap ciTx itms
             }

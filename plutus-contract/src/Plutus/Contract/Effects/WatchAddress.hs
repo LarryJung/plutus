@@ -5,7 +5,6 @@
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE MonoLocalBinds      #-}
 {-# LANGUAGE NamedFieldPuns      #-}
-{-# LANGUAGE OverloadedLabels    #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE TypeOperators       #-}
@@ -28,20 +27,21 @@ module Plutus.Contract.Effects.WatchAddress(
 import           Data.Map                          (Map)
 import qualified Data.Map                          as Map
 import           Data.Row
-import           Ledger                            (Address, OnChainTx, Slot, Value)
+import           Ledger                            (Address, OnChainTx, Value)
 import           Ledger.AddressMap                 (AddressMap, UtxoMap)
 import qualified Ledger.AddressMap                 as AM
 import qualified Ledger.Interval                   as Interval
+import           Ledger.Time                       (POSIXTime)
 import           Ledger.Tx                         (txOutTxOut, txOutValue)
 import qualified Ledger.Value                      as V
-import           Plutus.Contract.Effects.AwaitSlot (HasAwaitSlot, awaitSlot, currentSlot)
+import           Plutus.Contract.Effects.AwaitTime (HasAwaitTime, awaitTime, currentTime)
 import           Plutus.Contract.Effects.UtxoAt    (HasUtxoAt, utxoAt)
 import           Plutus.Contract.Request           (ContractRow, requestMaybe)
 import           Plutus.Contract.Schema            (Event (..), Handlers (..), Input, Output)
 import           Plutus.Contract.Types             (AsContractError, Contract)
 import           Plutus.Contract.Util              (loopM)
-import           Wallet.Types                      (AddressChangeRequest (..), AddressChangeResponse (..), slotRange,
-                                                    targetSlot)
+import           Wallet.Types                      (AddressChangeRequest (..), AddressChangeResponse (..), targetTime,
+                                                    timeRange)
 
 type AddressSymbol = "address"
 
@@ -52,45 +52,45 @@ type HasWatchAddress s =
 
 type WatchAddress = AddressSymbol .== (AddressChangeResponse, AddressChangeRequest)
 
-{-| Get the transactions that modified an address in a specific slot.
+{-| Get the transactions that modified an address in a specific time.
 -}
 addressChangeRequest ::
     forall w s e.
     ( HasWatchAddress s
     , AsContractError e
-    , HasAwaitSlot s
+    , HasAwaitTime s
     )
     => AddressChangeRequest
     -> Contract w s e AddressChangeResponse
 addressChangeRequest rq = do
     let check :: AddressChangeResponse -> Maybe AddressChangeResponse
-        check r@AddressChangeResponse{acrAddress, acrSlotRange}
-                | acrAddress == acreqAddress rq && acrSlotRange == slotRange rq = Just r
+        check r@AddressChangeResponse{acrAddress, acrTimeRange}
+                | acrAddress == acreqAddress rq && acrTimeRange == timeRange rq = Just r
                 | otherwise = Nothing
-    _ <- awaitSlot (targetSlot rq)
+    _ <- awaitTime (targetTime rq)
     requestMaybe @w @AddressSymbol @_ @_ @s rq check
 
--- | Call 'addresssChangeRequest' for the address in each slot, until at least one
+-- | Call 'addresssChangeRequest' for the address in each time, until at least one
 --   transaction is returned that modifies the address.
 nextTransactionsAt ::
     forall w s e.
     ( HasWatchAddress s
     , AsContractError e
-    , HasAwaitSlot s
+    , HasAwaitTime s
     )
     => Address
     -> Contract w s e [OnChainTx]
 nextTransactionsAt addr = do
-    initial <- currentSlot
-    let go sl = do
+    initial <- currentTime
+    let go time = do
             txns <- acrTxns <$> addressChangeRequest AddressChangeRequest
-                { acreqSlotRangeFrom = sl
-                , acreqSlotRangeTo = sl
+                { acreqTimeRangeFrom = time
+                , acreqTimeRangeTo = time
                 , acreqAddress = addr
                 }
 
             if null txns
-                then go (succ sl)
+                then go (succ time)
                 else pure txns
     go initial
 
@@ -100,7 +100,7 @@ nextTransactionsAt addr = do
 fundsAtAddressGt
     :: forall w s e.
        ( AsContractError e
-       , HasAwaitSlot s
+       , HasAwaitTime s
        , HasUtxoAt s
        )
     => Address
@@ -112,7 +112,7 @@ fundsAtAddressGt addr vl =
 fundsAtAddressCondition
     :: forall w s e.
        ( AsContractError e
-       , HasAwaitSlot s
+       , HasAwaitTime s
        , HasUtxoAt s
        )
     => (Value -> Bool)
@@ -121,11 +121,11 @@ fundsAtAddressCondition
 fundsAtAddressCondition condition addr = loopM go () where
     go () = do
         cur <- utxoAt addr
-        sl <- currentSlot
+        time <- currentTime
         let presentVal = foldMap (txOutValue . txOutTxOut) cur
         if condition presentVal
             then pure (Right cur)
-            else awaitSlot (sl + 1) >> pure (Left ())
+            else awaitTime (time + 1) >> pure (Left ())
 
 -- | Watch an address for changes, and return the outputs
 --   at that address when the total value at the address
@@ -133,7 +133,7 @@ fundsAtAddressCondition condition addr = loopM go () where
 fundsAtAddressGeq
     :: forall w s e.
        ( AsContractError e
-       , HasAwaitSlot s
+       , HasAwaitTime s
        , HasUtxoAt s
        )
     => Address
@@ -150,12 +150,12 @@ events
        ( HasType AddressSymbol AddressChangeResponse (Input s)
        , AllUniqueLabels (Input s)
        )
-    => Slot
+    => POSIXTime
     -> AddressMap
     -> OnChainTx
     -> Map Address (Event s)
-events sl utxo tx =
-    let mkEvent addr = AddressChangeResponse{acrAddress=addr,acrSlotRange=Interval.singleton sl,acrTxns=[tx]}
+events time utxo tx =
+    let mkEvent addr = AddressChangeResponse{acrAddress=addr,acrTimeRange=Interval.singleton time,acrTxns=[tx]}
     in Map.fromSet
         (Event . IsJust (Label @AddressSymbol) . mkEvent)
         (AM.addressesTouched utxo tx)

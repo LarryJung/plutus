@@ -1,17 +1,16 @@
-{-# LANGUAGE DataKinds          #-}
-{-# LANGUAGE DeriveAnyClass     #-}
-{-# LANGUAGE DeriveGeneric      #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE DerivingVia        #-}
-{-# LANGUAGE FlexibleContexts   #-}
-{-# LANGUAGE LambdaCase         #-}
-{-# LANGUAGE MonoLocalBinds     #-}
-{-# LANGUAGE NamedFieldPuns     #-}
-{-# LANGUAGE NoImplicitPrelude  #-}
-{-# LANGUAGE OverloadedStrings  #-}
-{-# LANGUAGE TemplateHaskell    #-}
-{-# LANGUAGE TypeApplications   #-}
-{-# LANGUAGE TypeOperators      #-}
+{-# LANGUAGE DataKinds         #-}
+{-# LANGUAGE DeriveAnyClass    #-}
+{-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE DerivingVia       #-}
+{-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE MonoLocalBinds    #-}
+{-# LANGUAGE NamedFieldPuns    #-}
+{-# LANGUAGE NoImplicitPrelude #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TypeApplications  #-}
+{-# LANGUAGE TypeOperators     #-}
 {- Stablecoin backed by a cryptocurrency.
 
 = Concept
@@ -99,7 +98,7 @@ import           Plutus.Contract
 import           Plutus.Contract.StateMachine    (SMContractError, State (..), StateMachine, StateMachineClient (..),
                                                   StateMachineInstance (..), Void)
 import qualified Plutus.Contract.StateMachine    as StateMachine
-import qualified PlutusTx                        as PlutusTx
+import qualified PlutusTx
 import           PlutusTx.Prelude
 import           PlutusTx.Ratio                  as R
 import qualified Prelude                         as Haskell
@@ -255,9 +254,9 @@ data SCAction
 calcFees :: Stablecoin -> BankState -> ConversionRate -> SCAction -> BC (Ratio Integer)
 calcFees sc@Stablecoin{scFee} bs conversionRate = \case
     MintStablecoin (SC i) ->
-        stablecoinNominalPrice bs conversionRate * (BC scFee) * (BC $ abs $ fromInteger i)
+        stablecoinNominalPrice bs conversionRate * BC scFee * (BC $ abs $ fromInteger i)
     MintReserveCoin (RC i) ->
-        reservecoinNominalPrice sc bs conversionRate * (BC scFee) * (BC $ abs $ fromInteger i)
+        reservecoinNominalPrice sc bs conversionRate * BC scFee * (BC $ abs $ fromInteger i)
 
 -- | Input to the stablecoin state machine
 data Input =
@@ -287,7 +286,7 @@ transition sc State{stateData=oldState} input =
 --   is valid.
 applyInput :: forall i o. Stablecoin -> BankState -> Input -> Maybe (TxConstraints i o, BankState)
 applyInput sc@Stablecoin{scOracle,scStablecoinTokenName,scReservecoinTokenName} bs@BankState{bsForgingPolicyScript} Input{inpSCAction, inpConversionRate} = do
-    (Observation{obsValue=rate, obsSlot}, constraints) <- either (const Nothing) pure (verifySignedMessageConstraints scOracle inpConversionRate)
+    (Observation{obsValue=rate, obsTime}, constraints) <- either (const Nothing) pure (verifySignedMessageConstraints scOracle inpConversionRate)
     let fees = calcFees sc bs rate inpSCAction
         (newState, newConstraints) = case inpSCAction of
             MintStablecoin sc' ->
@@ -302,7 +301,7 @@ applyInput sc@Stablecoin{scOracle,scStablecoinTokenName,scReservecoinTokenName} 
                 { bsReservecoins = bsReservecoins bs + rc
                 , bsReserves = bsReserves bs + fmap round (fees + rcValue)
                 }, Constraints.mustForgeCurrency bsForgingPolicyScript scReservecoinTokenName (unRC rc))
-    let dateConstraints = Constraints.mustValidateIn $ Interval.from obsSlot
+    let dateConstraints = Constraints.mustValidateIn $ Interval.from obsTime
     pure (constraints <> newConstraints <> dateConstraints, newState)
 
 {-# INLINEABLE step #-}

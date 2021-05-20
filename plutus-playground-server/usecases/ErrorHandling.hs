@@ -16,8 +16,9 @@ import           Control.Monad.Error.Lens (catching, throwing, throwing_)
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 
+import qualified Ledger.TimeSlot          as TimeSlot
 import           Playground.Contract
-import           Plutus.Contract          (AsContractError (_ContractError), ContractError, HasAwaitSlot, logInfo,
+import           Plutus.Contract          (AsContractError (_ContractError), ContractError, HasAwaitTime, logInfo,
                                            mapError, select)
 import           Prelude                  (Maybe (..), const, show, ($), (.), (<>), (>>), (>>=))
 
@@ -70,10 +71,10 @@ throwAndCatch e =
 
 -- | Handle an error from 'awaitSlot' by wrapping it in the 'AContractError'
 --   constructor
-catchContractError :: (AsMyError e, HasAwaitSlot s) => Contract () s e ()
+catchContractError :: (AsMyError e, HasAwaitTime s) => Contract () s e ()
 catchContractError =
     catching _AContractError
-        (void $ mapError (review _AContractError) $ awaitSlot 10)
+        (void $ mapError (review _AContractError) $ awaitTime $ TimeSlot.slotToPOSIXTime 10)
         (\_ -> throwing_ _Error2)
 
 contract

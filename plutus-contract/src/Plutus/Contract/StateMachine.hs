@@ -7,7 +7,6 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE LambdaCase             #-}
 {-# LANGUAGE MonoLocalBinds         #-}
-{-# LANGUAGE MultiParamTypeClasses  #-}
 {-# LANGUAGE NamedFieldPuns         #-}
 {-# LANGUAGE TemplateHaskell        #-}
 {-# LANGUAGE TypeApplications       #-}
@@ -55,7 +54,7 @@ import           Data.Text                            (Text)
 import qualified Data.Text                            as Text
 import           Data.Void                            (Void, absurd)
 import           GHC.Generics                         (Generic)
-import           Ledger                               (Slot, Value)
+import           Ledger                               (POSIXTime, Value)
 import qualified Ledger
 import           Ledger.AddressMap                    (UtxoMap, outputsMapFromTxForAddress)
 import           Ledger.Constraints                   (ScriptLookups, TxConstraints (..), mustPayToTheScript)
@@ -72,7 +71,7 @@ import qualified Ledger.Value                         as Value
 import           Plutus.Contract
 import           Plutus.Contract.StateMachine.OnChain (State (..), StateMachine (..), StateMachineInstance (..))
 import qualified Plutus.Contract.StateMachine.OnChain as SM
-import qualified PlutusTx                             as PlutusTx
+import qualified PlutusTx
 
 -- $statemachine
 -- To write your contract as a state machine you need
@@ -198,14 +197,14 @@ getOnChainState StateMachineClient{scInstance, scChooser} = mapError (review _SM
 
 
 data WaitingResult a
-    = Timeout Slot
+    = Timeout POSIXTime
     | ContractEnded
     | WaitingResult a
   deriving (Show,Generic)
   deriving anyclass (ToJSON, FromJSON)
 
 
--- | Wait for the on-chain state of the state machine instance to change until timeoutSlot,
+-- | Wait for the on-chain state of the state machine instance to change until timeoutTime,
 --   and return the new state, or return 'ContractEnded' if the instance has been
 --   terminated. If 'waitForUpdate' is called before the instance has even
 --   started then it returns the first state of the instance as soon as it
@@ -214,30 +213,30 @@ waitForUpdateUntil ::
     ( AsSMContractError e
     , AsContractError e
     , PlutusTx.IsData state
-    , HasAwaitSlot schema
+    , HasAwaitTime schema
     , HasWatchAddress schema)
     => StateMachineClient state i
-    -> Slot
+    -> POSIXTime
     -> Contract w schema e (WaitingResult state)
-waitForUpdateUntil StateMachineClient{scInstance, scChooser} timeoutSlot = do
+waitForUpdateUntil StateMachineClient{scInstance, scChooser} timeoutTime = do
     let addr = Scripts.scriptAddress $ validatorInstance scInstance
-    let go sl = do
+    let go time = do
             txns <- acrTxns <$> addressChangeRequest AddressChangeRequest
-                { acreqSlotRangeFrom = sl
-                , acreqSlotRangeTo = sl
+                { acreqTimeRangeFrom = time
+                , acreqTimeRangeTo = time
                 , acreqAddress = addr
                 }
-            if null txns && sl < timeoutSlot
-                then go (succ sl)
+            if null txns && time < timeoutTime
+                then go (succ time)
                 else pure txns
 
-    initial <- currentSlot
+    initial <- currentTime
     txns <- go initial
-    slot <- currentSlot -- current slot, can be after timeout
+    time <- currentTime -- current time, can be after timeout
     let states = txns >>= getStates scInstance . outputsMapFromTxForAddress addr
     case states of
-        [] | slot < timeoutSlot -> pure ContractEnded
-        [] | slot >= timeoutSlot -> pure $ Timeout timeoutSlot
+        [] | time < timeoutTime -> pure ContractEnded
+        [] | time >= timeoutTime -> pure $ Timeout timeoutTime
         xs -> case scChooser xs of
                 Left err         -> throwing _SMContractError err
                 Right (state, _) -> pure $ WaitingResult (tyTxOutData state)
@@ -252,7 +251,7 @@ waitForUpdate ::
     ( AsSMContractError e
     , AsContractError e
     , PlutusTx.IsData state
-    , HasAwaitSlot schema
+    , HasAwaitTime schema
     , HasWatchAddress schema)
     => StateMachineClient state i
     -> Contract w schema e (Maybe (OnChainState state i))
@@ -282,7 +281,7 @@ runGuardedStep ::
     -> (UnbalancedTx -> state -> state -> Maybe a) -- ^ The guard to check before running the step
     -> Contract w schema e (Either a (TransitionResult state input))
 runGuardedStep smc input guard = mapError (review _SMContractError) $ mkStep smc input >>= \case
-    Right (StateMachineTransition{smtConstraints,smtOldState=State{stateData=os}, smtNewState=State{stateData=ns}, smtLookups}) -> do
+    Right StateMachineTransition{smtConstraints,smtOldState=State{stateData=os}, smtNewState=State{stateData=ns}, smtLookups} -> do
         pk <- ownPubKey
         let lookups = smtLookups { Constraints.slOwnPubkey = Just $ pubKeyHash pk }
         utx <- either (throwing _ConstraintResolutionError) pure (Constraints.mkTx lookups smtConstraints)

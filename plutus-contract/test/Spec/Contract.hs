@@ -22,10 +22,11 @@ import qualified Control.Monad.Freer.Extras.Log         as Log
 import           Test.Tasty
 
 import           Ledger                                 (Address, PubKey, Slot)
-import qualified Ledger                                 as Ledger
+import qualified Ledger
 import qualified Ledger.Ada                             as Ada
 import qualified Ledger.Constraints                     as Constraints
 import qualified Ledger.Crypto                          as Crypto
+import qualified Ledger.TimeSlot                        as TimeSlot
 import           Plutus.Contract                        as Con
 import           Plutus.Contract.Test
 import           Plutus.Contract.Types                  (ResumableResult (..))
@@ -35,7 +36,7 @@ import           Plutus.Trace.Emulator                  (ContractInstanceTag, Em
                                                          activeEndpoints, callEndpoint)
 import           Plutus.Trace.Emulator.Types            (ContractInstanceLog (..), ContractInstanceMsg (..),
                                                          ContractInstanceState (..), UserThreadMsg (..))
-import qualified PlutusTx                               as PlutusTx
+import qualified PlutusTx
 import           PlutusTx.Lattice
 import           Prelude                                hiding (not)
 import qualified Prelude                                as P
@@ -58,29 +59,29 @@ tests =
 
     in
     testGroup "contracts"
-        [ check 1 "awaitSlot" (void $ awaitSlot 10) $ \con ->
-            (waitingForSlot con tag 10)
+        [ check 1 "awaitTime" (void $ awaitTime $ TimeSlot.slotToPOSIXTime 10) $ \con ->
+            waitingForTime con tag (TimeSlot.slotToPOSIXTime 10)
 
-        , check 1 "selectEither" (void $ selectEither (awaitSlot 10) (awaitSlot 5)) $ \con ->
-            (waitingForSlot con tag 5)
+        , check 1 "selectEither" (void $ selectEither (awaitTime $ TimeSlot.slotToPOSIXTime 10) (awaitTime $ TimeSlot.slotToPOSIXTime 5)) $ \con ->
+            waitingForTime con tag (TimeSlot.slotToPOSIXTime 5)
 
-        , check 1 "until" (void $ void $ awaitSlot 10 `Con.until` 5) $ \con ->
-            (waitingForSlot con tag 5)
+        , check 1 "until" (void $ awaitTime (TimeSlot.slotToPOSIXTime 10) `Con.until` TimeSlot.slotToPOSIXTime 5) $ \con ->
+            waitingForTime con tag (TimeSlot.slotToPOSIXTime 5)
 
-        , check 1 "both" (void $ Con.both (awaitSlot 10) (awaitSlot 20)) $ \con ->
-            (waitingForSlot con tag 10)
+        , check 1 "both" (void $ Con.both (awaitTime $ TimeSlot.slotToPOSIXTime 10) (awaitTime $ TimeSlot.slotToPOSIXTime 20)) $ \con ->
+            waitingForTime con tag (TimeSlot.slotToPOSIXTime 10)
 
-        , check 1 "both (2)" (void $ Con.both (awaitSlot 10) (awaitSlot 20)) $ \con ->
-            (waitingForSlot con tag 20)
+        , check 1 "both (2)" (void $ Con.both (awaitTime $ TimeSlot.slotToPOSIXTime 10) (awaitTime $ TimeSlot.slotToPOSIXTime 20)) $ \con ->
+            waitingForTime con tag (TimeSlot.slotToPOSIXTime 20)
 
-        , check 1 "watchAddressUntil" (void $ watchAddressUntil someAddress 5) $ \con ->
-            (waitingForSlot con tag 5)
+        , check 1 "watchAddressUntil" (void $ watchAddressUntil someAddress $ TimeSlot.slotToPOSIXTime 5) $ \con ->
+            waitingForTime con tag (TimeSlot.slotToPOSIXTime 5)
 
         , check 1 "endpoint" (endpoint @"ep") $ \con ->
-            (endpointAvailable @"ep" con tag)
+            endpointAvailable @"ep" con tag
 
         , check 1 "forever" (forever $ endpoint @"ep") $ \con ->
-            (endpointAvailable @"ep" con tag)
+            endpointAvailable @"ep" con tag
 
         , let
             oneTwo :: Contract () Schema ContractError Int = endpoint @"1" >> endpoint @"2" >> endpoint @"4"
@@ -112,7 +113,7 @@ tests =
                 (activateContract w1 theContract tag >>= \hdl -> callEndpoint @"1" hdl 1 >> callEndpoint @"2" hdl 2)
 
         , let theContract :: Contract () Schema ContractError [ActiveEndpoint] = endpoint @"5" @[ActiveEndpoint]
-              expected = ActiveEndpoint{ aeDescription = (EndpointDescription "5"), aeMetadata = Nothing}
+              expected = ActiveEndpoint{ aeDescription = EndpointDescription "5", aeMetadata = Nothing}
           in run 5 "active endpoints"
                 (assertDone theContract tag ((==) [expected]) "should be done")
                 $ do
@@ -121,9 +122,10 @@ tests =
                     eps <- activeEndpoints hdl
                     void $ callEndpoint @"5" hdl eps
 
-        , let theContract :: Contract () Schema ContractError () = void $ submitTx mempty >> watchAddressUntil someAddress 20
+        , let theContract :: Contract () Schema ContractError () =
+                void $ submitTx mempty >> watchAddressUntil someAddress (TimeSlot.slotToPOSIXTime 20)
           in run 1 "submit tx"
-                (waitingForSlot theContract tag 20)
+                (waitingForTime theContract tag $ TimeSlot.slotToPOSIXTime 20)
                 (void $ activateContract w1 theContract tag)
 
         , let smallTx = Constraints.mustPayToPubKey (Crypto.pubKeyHash $ walletPubKey (Wallet 2)) (Ada.lovelaceValueOf 10)
@@ -146,10 +148,10 @@ tests =
                 (endpointAvailable @"1" theContract tag)
                 (void $ activateContract w1 theContract tag >>= \hdl -> callEndpoint @"1" hdl 1)
 
-        , let theContract :: Contract () Schema ContractError () = void $ collectUntil (+) 0 (endpoint @"1") 10
+        , let theContract :: Contract () Schema ContractError () = void $ collectUntil (+) 0 (endpoint @"1") (TimeSlot.slotToPOSIXTime 10)
           in run 1 "collect until"
                 (endpointAvailable @"1" theContract tag
-                    .&&. waitingForSlot theContract tag 10)
+                    .&&. waitingForTime theContract tag (TimeSlot.slotToPOSIXTime 10))
                 (activateContract w1 theContract tag >>= \hdl -> callEndpoint @"1" hdl 1)
 
         , let theContract :: Contract () Schema ContractError () = void $ throwing Con._ContractError $ OtherError "error"
@@ -165,7 +167,7 @@ tests =
 
         , let theContract :: Contract () Schema ContractError PubKey = ownPubKey
           in run 1 "own public key"
-                (assertDone theContract tag (== (walletPubKey w2)) "should return the wallet's public key")
+                (assertDone theContract tag (== walletPubKey w2) "should return the wallet's public key")
                 (void $ activateContract w2 (void theContract) tag)
 
         , let payment = Constraints.mustPayToPubKey (Crypto.pubKeyHash $ walletPubKey w2) (Ada.lovelaceValueOf 10)
@@ -175,7 +177,7 @@ tests =
             (activateContract w1 theContract tag >> void (Trace.waitNSlots 1))
 
         , run 1 "checkpoints"
-            (not (endpointAvailable @"2" checkpointContract tag) .&&. (endpointAvailable @"1" checkpointContract tag))
+            (not (endpointAvailable @"2" checkpointContract tag) .&&. endpointAvailable @"1" checkpointContract tag)
             (void $ activateContract w1 checkpointContract tag >>= \hdl -> callEndpoint @"1" hdl 1 >> callEndpoint @"2" hdl 1)
 
         , run 1 "error handling & checkpoints"
@@ -185,7 +187,7 @@ tests =
         , let theContract :: Contract () Schema ContractError () = logInfo @String "waiting for endpoint 1" >> endpoint @"1" >>= logInfo . (<>) "Received value: " . show
               matchLogs :: [EM.EmulatorTimeEvent ContractInstanceLog] -> Bool
               matchLogs lgs =
-                  case (_cilMessage . EM._eteEvent <$> lgs) of
+                  case _cilMessage . EM._eteEvent <$> lgs of
                             [ Started, ContractLog "waiting for endpoint 1", CurrentRequests [_], ReceiveEndpointCall _, ContractLog "Received value: 27", HandledRequest _, CurrentRequests [], StoppedNoError] -> True
                             _ -> False
 
@@ -196,7 +198,7 @@ tests =
         , let theContract :: Contract () Schema ContractError () = logInfo @String "waiting for endpoint 1" >> endpoint @"1" >>= logInfo . (<>) "Received value: " . show
               matchLogs :: [EM.EmulatorTimeEvent UserThreadMsg] -> Bool
               matchLogs lgs =
-                  case (EM._eteEvent <$> lgs) of
+                  case EM._eteEvent <$> lgs of
                             [ UserLog "Received contract state", UserLog "Final state: Right Nothing"] -> True
                             _                                                                          -> False
 

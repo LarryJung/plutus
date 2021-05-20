@@ -17,10 +17,10 @@ import qualified Data.Map                          as Map
 import           Data.Row
 import           Data.Text.Prettyprint.Doc
 import           GHC.Generics                      (Generic)
-import           Ledger                            (Address, Slot, TxOutTx (..))
+import           Ledger                            (Address, POSIXTime, TxOutTx (..))
 import           Ledger.AddressMap                 (UtxoMap)
 
-import           Plutus.Contract.Effects.AwaitSlot (HasAwaitSlot, awaitSlot)
+import           Plutus.Contract.Effects.AwaitTime (HasAwaitTime, awaitTime)
 import           Plutus.Contract.Request           (ContractRow, requestMaybe)
 import           Plutus.Contract.Schema            (Event (..), Handlers (..), Input, Output)
 import           Plutus.Contract.Types             (AsContractError, Contract)
@@ -73,15 +73,15 @@ utxoAtRequest
     -> Maybe Address
 utxoAtRequest (Handlers r) = trial' r (Label @UtxoAtSym)
 
--- | Watch an address until the given slot, then return all known outputs
+-- | Watch an address until the given time, then return all known outputs
 --   at the address.
 watchAddressUntil
     :: forall w s e.
-       ( HasAwaitSlot s
+       ( HasAwaitTime s
        , HasUtxoAt s
        , AsContractError e
        )
     => Address
-    -> Slot
+    -> POSIXTime
     -> Contract w s e UtxoMap
-watchAddressUntil a slot = awaitSlot slot >> utxoAt a
+watchAddressUntil a time = awaitTime time >> utxoAt a

@@ -43,7 +43,7 @@ module Playground.Contract
     , interval
     , ownPubKey
     , BlockchainActions
-    , awaitSlot
+    , awaitTime
     , modifiesUtxoSet
     , nextTransactionsAt
     , utxoAt
@@ -71,7 +71,7 @@ import           Playground.TH                          (ensureKnownCurrencies, 
 import           Playground.Types                       (Expression, FunctionSchema, KnownCurrency (KnownCurrency),
                                                          adaCurrency)
 import           Plutus.Contract                        (AsContractError, BlockchainActions, Contract, Endpoint,
-                                                         awaitSlot, nextTransactionsAt, submitTx, type (.\/), utxoAt,
+                                                         awaitTime, nextTransactionsAt, submitTx, type (.\/), utxoAt,
                                                          watchAddressUntil)
 import           Plutus.Contract.Effects.ExposeEndpoint (endpoint)
 import           Plutus.Contract.Effects.OwnPubKey      (ownPubKey)

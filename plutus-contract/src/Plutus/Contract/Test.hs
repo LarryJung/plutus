@@ -7,12 +7,10 @@
 {-# LANGUAGE GADTs                #-}
 {-# LANGUAGE KindSignatures       #-}
 {-# LANGUAGE LambdaCase           #-}
-{-# LANGUAGE MonoLocalBinds       #-}
 {-# LANGUAGE NamedFieldPuns       #-}
 {-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE TypeApplications     #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns         #-}
 -- | Testing contracts with HUnit and Tasty
@@ -46,7 +44,7 @@ module Plutus.Contract.Test(
     , walletFundsChange
     , walletFundsExactChange
     , walletPaidFees
-    , waitingForSlot
+    , waitingForTime
     , walletWatchingAddress
     , valueAtAddress
     , dataAtAddress
@@ -71,7 +69,7 @@ import           Control.Applicative                    (liftA2)
 import           Control.Foldl                          (FoldM)
 import qualified Control.Foldl                          as L
 import           Control.Lens                           (at, makeLenses, to, (&), (.~), (^.))
-import           Control.Monad                          (guard, unless)
+import           Control.Monad                          (guard, unless, (>=>))
 import           Control.Monad.Freer                    (Eff, reinterpret, runM, sendM)
 import           Control.Monad.Freer.Error              (Error, runError)
 import           Control.Monad.Freer.Extras.Log         (LogLevel (..), LogMessage (..))
@@ -100,8 +98,8 @@ import           Test.Tasty.Providers                   (TestTree)
 import qualified Ledger.Ada                             as Ada
 import           Ledger.Constraints.OffChain            (UnbalancedTx)
 import           Ledger.Tx                              (Tx)
-import           Plutus.Contract.Effects.AwaitSlot      (SlotSymbol)
-import qualified Plutus.Contract.Effects.AwaitSlot      as AwaitSlot
+import           Plutus.Contract.Effects.AwaitTime      (TimeSymbol)
+import qualified Plutus.Contract.Effects.AwaitTime      as AwaitTime
 import qualified Plutus.Contract.Effects.ExposeEndpoint as Endpoints
 import qualified Plutus.Contract.Effects.UtxoAt         as UtxoAt
 import qualified Plutus.Contract.Effects.WatchAddress   as WatchAddress
@@ -119,6 +117,7 @@ import           Ledger.Generators                      (GeneratorModel, Mockcha
 import qualified Ledger.Generators                      as Gen
 import           Ledger.Index                           (ScriptValidationEvent, ValidationError)
 import           Ledger.Slot                            (Slot)
+import           Ledger.Time                            (POSIXTime)
 import           Ledger.Value                           (Value)
 import           Wallet.Emulator                        (EmulatorEvent, EmulatorTimeEvent)
 
@@ -275,7 +274,7 @@ interestingAddress
 interestingAddress contract inst addr =
     flip postMapM (Folds.instanceRequests contract inst) $ \rqs -> do
         let hks = mapMaybe WatchAddress.watchedAddress (rqRequest <$> rqs)
-        if any (== addr) hks
+        if elem addr hks
         then pure True
         else do
             tell @(Doc Void) $ hsep
@@ -298,7 +297,7 @@ queryingUtxoAt
 queryingUtxoAt contract inst addr =
     flip postMapM (Folds.instanceRequests contract inst) $ \rqs -> do
         let hks = mapMaybe UtxoAt.utxoAtRequest (rqRequest <$> rqs)
-        if any (== addr) hks
+        if elem addr hks
         then pure True
         else do
             tell @(Doc Void) $ hsep
@@ -378,21 +377,21 @@ dataAtAddress address check =
                 <+> foldMap (foldMap pretty . Ledger.txData . Ledger.txOutTxTx) utxo)
         pure result
 
-waitingForSlot
+waitingForTime
     :: forall w s e a.
-       ( HasType SlotSymbol AwaitSlot.WaitingForSlot (Output s)
+       ( HasType TimeSymbol AwaitTime.WaitingForTime (Output s)
        , ContractConstraints s
        , Monoid w
        )
     => Contract w s e a
     -> ContractInstanceTag
-    -> Slot
+    -> POSIXTime
     -> TracePredicate
-waitingForSlot contract inst sl =
+waitingForTime contract inst sl =
     flip postMapM (Folds.instanceRequests contract inst) $ \rqs ->
-        case mapMaybe (\e -> AwaitSlot.request e >>= guard . (==) sl) (rqRequest <$> rqs) of
+        case mapMaybe (AwaitTime.request >=> guard . (==) sl) (rqRequest <$> rqs) of
             [] -> do
-                tell @(Doc Void) $ pretty inst <+> "not waiting for any slot notifications. Expected:" <+>  viaShow sl
+                tell @(Doc Void) $ pretty inst <+> "not waiting for any time notifications. Expected:" <+>  viaShow sl
                 pure False
             _ -> pure True
 
@@ -545,7 +544,7 @@ walletPaidFees w val =
     flip postMapM (L.generalize $ Folds.walletFees w) $ \fees -> do
         let result = fees == val
         unless result $ do
-            tell @(Doc Void) $ vsep $
+            tell @(Doc Void) $ vsep
                 [ "Expected" <+> pretty w <+> "to pay"
                 , " " <+> viaShow val
                 , "lovelace in fees, but they paid"
